@@ -42,11 +42,21 @@ export function ArView() {
 
   return (
     <div className="relative h-screen w-screen bg-black">
-      <Canvas camera={{ position: [4, 3, 6], fov: 60 }} shadows>
+      <Canvas
+        camera={{ position: [4, 3, 6], fov: 60 }}
+        shadows
+        gl={{ alpha: true, antialias: true, preserveDrawingBuffer: false }}
+        onCreated={({ gl, scene }) => {
+          // Transparent clear so the WebXR AR compositor can show the camera
+          // feed through the canvas. Without this the scene paints solid black
+          // over the camera pass-through.
+          gl.setClearColor(0x000000, 0);
+          scene.background = null;
+        }}
+      >
         <XR referenceSpace="local-floor">
           <ambientLight intensity={0.6} />
           <directionalLight position={[5, 10, 3]} intensity={1.2} castShadow />
-          <Environment preset="park" />
           {xrSupported ? (
             <ArPlacementController
               placed={placed}
@@ -59,7 +69,8 @@ export function ArView() {
             </ArPlacementController>
           ) : (
             <>
-              {/* Non-AR orbit fallback */}
+              {/* Non-AR orbit fallback — add env lighting + ground plane */}
+              <Environment preset="park" />
               <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
                 <planeGeometry args={[50, 50]} />
                 <meshStandardMaterial color="#d6d3d1" />
