@@ -54,18 +54,33 @@ function PlantInstance({
  * from the viewer.
  */
 export function BedScene({ design }: { design: Design }) {
+  // Compute the bed's centroid in feet so we can center it at the local origin.
+  // Without this, the design's (0,0,0) is arbitrary (top-left of plan), which
+  // makes the bed extend off in one direction from the AR tap point.
+  const center = useMemo(() => {
+    const pts = design.bed.points;
+    if (pts.length === 0) return { cx: 0, cy: 0 };
+    let sx = 0;
+    let sy = 0;
+    for (const p of pts) {
+      sx += p.x;
+      sy += p.y;
+    }
+    return { cx: sx / pts.length, cy: sy / pts.length };
+  }, [design.bed.points]);
+
   const bedShape = useMemo(() => {
     if (design.bed.points.length < 3) return null;
     const shape = new THREE.Shape();
     design.bed.points.forEach((p, i) => {
-      const x = ftToM(p.x);
-      const z = ftToM(p.y);
+      const x = ftToM(p.x - center.cx);
+      const z = ftToM(p.y - center.cy);
       if (i === 0) shape.moveTo(x, z);
       else shape.lineTo(x, z);
     });
     shape.closePath();
     return shape;
-  }, [design.bed.points]);
+  }, [design.bed.points, center]);
 
   return (
     <group>
@@ -84,7 +99,11 @@ export function BedScene({ design }: { design: Design }) {
           <PlantInstance
             key={pp.uid}
             plant={plant}
-            position={[ftToM(pp.x), 0, ftToM(pp.y)]}
+            position={[
+              ftToM(pp.x - center.cx),
+              0,
+              ftToM(pp.y - center.cy),
+            ]}
           />
         );
       })}

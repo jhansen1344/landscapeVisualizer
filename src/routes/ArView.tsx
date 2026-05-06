@@ -225,8 +225,12 @@ function ArPlacementController({
           const q = new THREE.Quaternion();
           const s = new THREE.Vector3();
           placed.decompose(p, q, s);
+          // Use only the position from the hit-test. Ignore the surface-normal
+          // rotation so the bed always stays flat on the horizontal plane,
+          // even if the detected surface was slightly tilted (e.g. an edge of
+          // a rug, a sloped lawn, or a non-flat bit of floor geometry).
           return (
-            <group position={p} quaternion={q}>
+            <group position={p}>
               {children}
             </group>
           );
