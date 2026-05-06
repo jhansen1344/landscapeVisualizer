@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { ARButton, XR, Controllers, useHitTest } from "@react-three/xr";
 import { OrbitControls, Environment } from "@react-three/drei";
 import * as THREE from "three";
@@ -116,7 +116,11 @@ export function ArView() {
             <ARButton
               sessionInit={{
                 requiredFeatures: ["hit-test"],
-                optionalFeatures: ["dom-overlay", "local-floor"],
+                optionalFeatures: [
+                  "dom-overlay",
+                  "local-floor",
+                  "anchors",
+                ],
                 domOverlay: { root: overlayRef.current ?? document.body },
               }}
               style={{
@@ -157,7 +161,12 @@ export function ArView() {
   );
 }
 
-/** Shows a reticle on detected surfaces; on tap, anchors the children. */
+/**
+ * Shows a reticle on detected surfaces; on tap, creates an XRAnchor at the
+ * hit pose and parents the children to it so they stay glued to the real
+ * world as WebXR's tracking refines itself. Falls back to a static pose
+ * snapshot when the session doesn't grant the "anchors" feature.
+ */
 function ArPlacementController({
   placed,
   onPlace,
@@ -168,10 +177,14 @@ function ArPlacementController({
   children: React.ReactNode;
 }) {
   const reticleRef = useRef<THREE.Mesh>(null);
+  const anchoredGroupRef = useRef<THREE.Group>(null);
   const latestHit = useRef<THREE.Matrix4 | null>(null);
+  const latestHitResult = useRef<XRHitTestResult | null>(null);
+  const anchorRef = useRef<XRAnchor | null>(null);
 
-  useHitTest((hitMatrix) => {
+  useHitTest((hitMatrix, hit) => {
     latestHit.current = hitMatrix.clone();
+    latestHitResult.current = hit ?? null;
     if (reticleRef.current && !placed) {
       hitMatrix.decompose(
         reticleRef.current.position,
@@ -182,33 +195,64 @@ function ArPlacementController({
     }
   });
 
-  useEffect(() => {
-    function onSelect() {
-      if (!placed && latestHit.current) {
-        onPlace(latestHit.current.clone());
-      }
-    }
-    const sess = (window as any).__xrSession;
-    // Listen via window for simplicity; react-three/xr also exposes events.
-    window.addEventListener("xrselect", onSelect);
-    return () => window.removeEventListener("xrselect", onSelect);
-  }, [placed, onPlace]);
+  // Every frame, if we have an anchor, resolve its current pose and update
+  // the group. This is what keeps the bed glued to the floor as the device's
+  // world tracking drifts/corrects.
+  useFrame((state, _delta, xrFrame) => {
+    const anchor = anchorRef.current;
+    const group = anchoredGroupRef.current;
+    if (!anchor || !group || !xrFrame) return;
+    const refSpace = state.gl.xr.getReferenceSpace();
+    if (!refSpace) return;
+    const pose = xrFrame.getPose(
+      (anchor as unknown as { anchorSpace: XRSpace }).anchorSpace,
+      refSpace
+    );
+    if (!pose) return;
+    const m = pose.transform.matrix;
+    group.position.set(m[12], m[13], m[14]);
+    // Intentionally ignore rotation so the bed stays flat (see earlier fix).
+  });
 
-  // Use the XR session's "select" event
   useEffect(() => {
-    const gl = (window as any).__xrGl;
-    void gl;
-    // react-three/xr forwards "select" to the onSelect prop of <Interactive>;
-    // we use an alternate approach: listen at the canvas for touchend when no
-    // object is placed.
-    function onTouch() {
-      if (!placed && latestHit.current) {
-        onPlace(latestHit.current.clone());
+    async function place() {
+      if (placed) return;
+      const hit = latestHitResult.current;
+      const mat = latestHit.current;
+      if (!mat) return;
+
+      // Preferred path: create a real XRAnchor so the system tracks it.
+      if (hit && typeof (hit as XRHitTestResult).createAnchor === "function") {
+        try {
+          const anchor = await (hit as XRHitTestResult).createAnchor!();
+          if (anchor) {
+            anchorRef.current = anchor;
+            onPlace(mat.clone()); // flips `placed` + hides help
+            return;
+          }
+        } catch (err) {
+          console.warn("XRAnchor creation failed; using static pose.", err);
+        }
       }
+      // Fallback: static matrix snapshot (will drift).
+      onPlace(mat.clone());
+    }
+    function onTouch() {
+      void place();
     }
     window.addEventListener("touchend", onTouch);
     return () => window.removeEventListener("touchend", onTouch);
   }, [placed, onPlace]);
+
+  // Clear the anchor when placement is reset (e.g. if we add a "reset" button
+  // later). Today this just runs once on unmount.
+  useEffect(() => {
+    return () => {
+      anchorRef.current = null;
+    };
+  }, []);
+
+  const hasAnchor = anchorRef.current !== null;
 
   return (
     <>
@@ -219,21 +263,18 @@ function ArPlacementController({
           <meshBasicMaterial color="#ffffff" />
         </mesh>
       )}
-      {placed &&
+      {placed && hasAnchor && (
+        // Anchor-tracked group: position is overwritten each frame.
+        <group ref={anchoredGroupRef}>{children}</group>
+      )}
+      {placed && !hasAnchor &&
         (() => {
+          // Fallback path: no anchor available, use the captured pose.
           const p = new THREE.Vector3();
           const q = new THREE.Quaternion();
           const s = new THREE.Vector3();
           placed.decompose(p, q, s);
-          // Use only the position from the hit-test. Ignore the surface-normal
-          // rotation so the bed always stays flat on the horizontal plane,
-          // even if the detected surface was slightly tilted (e.g. an edge of
-          // a rug, a sloped lawn, or a non-flat bit of floor geometry).
-          return (
-            <group position={p}>
-              {children}
-            </group>
-          );
+          return <group position={p}>{children}</group>;
         })()}
     </>
   );
