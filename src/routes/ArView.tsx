@@ -14,6 +14,14 @@ export function ArView() {
   const [placed, setPlaced] = useState<THREE.Matrix4 | null>(null);
   const [showHelp, setShowHelp] = useState(true);
   const navigate = useNavigate();
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [overlayReady, setOverlayReady] = useState(false);
+
+  useEffect(() => {
+    // ARButton reads domOverlay.root at click-time, so the ref must exist
+    // before the user taps. We force a re-render once the div is mounted.
+    setOverlayReady(true);
+  }, []);
 
   useEffect(() => {
     const xr = (navigator as any).xr;
@@ -41,7 +49,9 @@ export function ArView() {
   }
 
   return (
-    <div className="relative h-screen w-screen bg-black">
+    // No bg-black here: during AR, the DOM overlay is composited on top of
+    // the camera feed, so any opaque background here would cover it.
+    <div className="relative h-screen w-screen">
       <Canvas
         camera={{ position: [4, 3, 6], fov: 60 }}
         shadows
@@ -83,56 +93,66 @@ export function ArView() {
         </XR>
       </Canvas>
 
-      {/* Top-left back button */}
-      <Link
-        to="/design"
-        className="absolute top-3 left-3 z-30 bg-white/90 hover:bg-white rounded-full p-2 shadow"
-        title="Back to designer"
+      {/*
+       * Dedicated DOM-overlay root. Only the elements inside this div will
+       * be composited over the camera during the AR session. Keep it
+       * pointer-events:none so taps pass through to the XR session, and
+       * re-enable pointer events selectively on interactive children.
+       */}
+      <div
+        ref={overlayRef}
+        className="absolute inset-0 z-30 pointer-events-none"
       >
-        <ArrowLeft className="h-5 w-5 text-stone-800" />
-      </Link>
+        <Link
+          to="/design"
+          className="pointer-events-auto absolute top-3 left-3 bg-white/90 hover:bg-white rounded-full p-2 shadow"
+          title="Back to designer"
+        >
+          <ArrowLeft className="h-5 w-5 text-stone-800" />
+        </Link>
 
-      {/* XR entry button + fallback banner */}
-      <div className="absolute bottom-5 left-0 right-0 z-30 flex justify-center px-4">
-        {xrSupported ? (
-          <ARButton
-            sessionInit={{
-              requiredFeatures: ["hit-test"],
-              optionalFeatures: ["dom-overlay", "local-floor"],
-              domOverlay: { root: document.body },
-            }}
-            style={{
-              position: "relative",
-              fontSize: 14,
-              padding: "12px 20px",
-              background: "#15803d",
-              color: "white",
-              border: "none",
-              borderRadius: 999,
-              boxShadow: "0 4px 14px rgba(0,0,0,0.3)",
-              cursor: "pointer",
-            }}
-          />
-        ) : xrSupported === false ? (
-          <div className="bg-white/95 rounded-lg shadow px-4 py-3 max-w-md text-sm">
-            <div className="flex items-center gap-2 font-medium">
-              <Info className="h-4 w-4 text-amber-600" />
-              AR not available on this device
+        <div className="pointer-events-auto absolute bottom-5 left-0 right-0 flex justify-center px-4">
+          {xrSupported && overlayReady ? (
+            <ARButton
+              sessionInit={{
+                requiredFeatures: ["hit-test"],
+                optionalFeatures: ["dom-overlay", "local-floor"],
+                domOverlay: { root: overlayRef.current ?? document.body },
+              }}
+              style={{
+                position: "relative",
+                fontSize: 14,
+                padding: "12px 20px",
+                background: "#15803d",
+                color: "white",
+                border: "none",
+                borderRadius: 999,
+                boxShadow: "0 4px 14px rgba(0,0,0,0.3)",
+                cursor: "pointer",
+              }}
+            />
+          ) : xrSupported === false ? (
+            <div className="bg-white/95 rounded-lg shadow px-4 py-3 max-w-md text-sm">
+              <div className="flex items-center gap-2 font-medium">
+                <Info className="h-4 w-4 text-amber-600" />
+                AR not available on this device
+              </div>
+              <p className="text-xs text-stone-600 mt-1">
+                WebXR requires Android Chrome or a WebXR-capable browser.
+                You're seeing a 3D preview instead — drag to orbit, scroll to
+                zoom.
+              </p>
             </div>
-            <p className="text-xs text-stone-600 mt-1">
-              WebXR requires Android Chrome or a WebXR-capable browser. You're
-              seeing a 3D preview instead — drag to orbit, scroll to zoom.
-            </p>
-          </div>
-        ) : null}
-      </div>
-
-      {showHelp && xrSupported && placed === null && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-white/95 rounded-lg shadow px-4 py-2 text-sm text-stone-800 max-w-sm text-center">
-          After entering AR, move your phone slowly to scan the ground, then tap
-          where you want the bed to be placed.
+          ) : null}
         </div>
-      )}
+
+        {showHelp && xrSupported && placed === null && (
+          <div className="pointer-events-auto absolute top-14 left-1/2 -translate-x-1/2 bg-white/95 rounded-lg shadow px-4 py-2 text-sm text-stone-800 max-w-sm text-center">
+            After entering AR, move your phone slowly to scan the ground, then
+            tap where you want the bed to be placed.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
