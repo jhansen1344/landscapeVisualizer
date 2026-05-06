@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search, Sun, CloudRain, Leaf, Settings2 } from "lucide-react";
+import { Search, Sun, CloudRain, Leaf, Settings2, X } from "lucide-react";
 import { useDesignStore } from "../store/useDesignStore";
 import { filterPlants } from "../lib/plants";
 import type { Plant } from "../types";
@@ -26,10 +26,15 @@ const HABIT_OPTS = [
 
 export function PlantPalette({
   onOpenRegion,
+  onPickedOnMobile,
 }: {
   onOpenRegion: () => void;
+  onPickedOnMobile?: () => void;
 }) {
   const region = useDesignStore((s) => s.region);
+  const armedPlantId = useDesignStore((s) => s.armedPlantId);
+  const setArmedPlant = useDesignStore((s) => s.setArmedPlant);
+  const readOnly = useDesignStore((s) => s.readOnly);
   const [q, setQ] = useState("");
   const [sun, setSun] = useState("");
   const [moisture, setMoisture] = useState("");
@@ -43,6 +48,20 @@ export function PlantPalette({
   function onDragStart(e: React.DragEvent, p: Plant) {
     e.dataTransfer.setData("text/plant-id", p.id);
     e.dataTransfer.effectAllowed = "copy";
+  }
+
+  function onPick(p: Plant) {
+    if (readOnly) return;
+    // Toggle: tapping the armed plant again disarms it.
+    if (armedPlantId === p.id) {
+      setArmedPlant(null);
+      return;
+    }
+    setArmedPlant(p.id);
+    // On mobile, dismiss the drawer so the user can see the canvas.
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+      onPickedOnMobile?.();
+    }
   }
 
   return (
@@ -76,14 +95,36 @@ export function PlantPalette({
           {plants.length} plants{region.showAll ? " (all regions)" : ""}
         </div>
       </div>
+      {armedPlantId && (
+        <div className="px-3 py-2 bg-brand-50 border-b border-brand-100 flex items-center gap-2 text-xs">
+          <span className="flex-1 text-brand-900">
+            <span className="font-semibold">Tap canvas to place.</span> Tap again to place more.
+          </span>
+          <button
+            onClick={() => setArmedPlant(null)}
+            className="p-1 rounded hover:bg-brand-100 text-brand-700"
+            title="Cancel placement"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {plants.map((p) => (
-          <div
+        {plants.map((p) => {
+          const armed = armedPlantId === p.id;
+          return (
+          <button
             key={p.id}
-            draggable
+            type="button"
+            draggable={!readOnly}
             onDragStart={(e) => onDragStart(e, p)}
-            className="group flex items-center gap-2 p-2 rounded-lg hover:bg-brand-50 cursor-grab active:cursor-grabbing border border-transparent hover:border-brand-200 transition-colors"
-            title={`Drag onto the canvas to plant\n${p.scientificName} · ${p.matureSpreadFt} ft spread`}
+            onClick={() => onPick(p)}
+            className={`group w-full text-left flex items-center gap-2 p-2 rounded-lg border transition-colors cursor-grab active:cursor-grabbing ${
+              armed
+                ? "bg-brand-100 border-brand-500 ring-2 ring-brand-300"
+                : "border-transparent hover:bg-brand-50 hover:border-brand-200"
+            }`}
+            title={`Tap to arm, or drag onto the canvas\n${p.scientificName} · ${p.matureSpreadFt} ft spread`}
           >
             <div
               className="h-7 w-7 rounded-full border border-stone-300 shrink-0"
@@ -101,8 +142,9 @@ export function PlantPalette({
               <div>{p.matureHeightFt}′H</div>
               <div>{p.matureSpreadFt}′W</div>
             </div>
-          </div>
-        ))}
+          </button>
+          );
+        })}
         {plants.length === 0 && (
           <div className="p-4 text-center text-xs text-stone-500">
             No plants match. Try clearing filters or changing region.

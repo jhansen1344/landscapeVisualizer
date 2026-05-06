@@ -48,6 +48,7 @@ interface State {
   currentId: string | null;
   region: RegionSelection;
   selectedUid: string | null;
+  armedPlantId: string | null;
   readOnly: boolean;
   past: HistoryEntry[];
   future: HistoryEntry[];
@@ -74,6 +75,7 @@ interface State {
   deletePlant: (uid: string) => void;
   duplicatePlant: (uid: string) => void;
   setSelected: (uid: string | null) => void;
+  setArmedPlant: (plantId: string | null) => void;
   rotateSelected: (deltaRad: number) => void;
   updatePlantQuantity: (uid: string, quantity: number) => void;
 
@@ -134,6 +136,7 @@ export const useDesignStore = create<State>((set, get) => {
     currentId,
     region,
     selectedUid: null,
+    armedPlantId: null,
     readOnly: false,
     past: [],
     future: [],
@@ -290,6 +293,8 @@ export const useDesignStore = create<State>((set, get) => {
       }),
 
     setSelected: (plantUid) => set({ selectedUid: plantUid }),
+
+    setArmedPlant: (plantId) => set({ armedPlantId: plantId }),
 
     rotateSelected: (deltaRad) =>
       withCurrent((d) => {

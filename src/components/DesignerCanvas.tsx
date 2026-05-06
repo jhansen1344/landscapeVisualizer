@@ -22,6 +22,8 @@ export function DesignerCanvas({ width, height, stageRef }: Props) {
   const addPlant = useDesignStore((s) => s.addPlant);
   const movePlant = useDesignStore((s) => s.movePlant);
   const setBedPoints = useDesignStore((s) => s.setBedPoints);
+  const armedPlantId = useDesignStore((s) => s.armedPlantId);
+  const setArmedPlant = useDesignStore((s) => s.setArmedPlant);
 
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 40, y: 40 });
@@ -73,6 +75,19 @@ export function DesignerCanvas({ width, height, stageRef }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawingBed, draftPts]);
 
+  // Escape cancels armed-plant placement
+  useEffect(() => {
+    if (!armedPlantId) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setArmedPlant(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [armedPlantId, setArmedPlant]);
+
   const pxPerFt = DEFAULT_PX_PER_FT * scale;
   const mode = design?.mode || "plan";
 
@@ -84,6 +99,54 @@ export function DesignerCanvas({ width, height, stageRef }: Props) {
 
   const snapFt = (v: number) =>
     mode === "grid" ? Math.round(v) : Math.round(v * 10) / 10;
+
+  function handlePointerMove(
+    e: Konva.KonvaEventObject<MouseEvent | TouchEvent>
+  ) {
+    const p = e.target.getStage()?.getPointerPosition();
+    if (!p) return;
+    const ft = screenToFt(p.x, p.y);
+    if (drawingBed) {
+      setCursorFt({ x: snapFt(ft.x), y: snapFt(ft.y) });
+    }
+    if (armedPlantId) {
+      setDragPreview({ x: snapFt(ft.x), y: snapFt(ft.y) });
+    }
+  }
+
+  function handlePointerDown(
+    e: Konva.KonvaEventObject<MouseEvent | TouchEvent>
+  ) {
+    const stage = e.target.getStage();
+    const isStageTarget = e.target === stage;
+    if (drawingBed) {
+      const p = stage?.getPointerPosition();
+      if (!p) return;
+      const ft = screenToFt(p.x, p.y);
+      const snap = { x: snapFt(ft.x), y: snapFt(ft.y) };
+      if (
+        draftPts.length >= 3 &&
+        Math.hypot(snap.x - draftPts[0].x, snap.y - draftPts[0].y) <
+          CLOSE_SNAP_FT
+      ) {
+        finishDrawing();
+        return;
+      }
+      setDraftPts((pts) => [...pts, snap]);
+      return;
+    }
+    // Tap-to-place: only on empty stage taps so dragging plants still works.
+    if (armedPlantId && isStageTarget) {
+      const p = stage?.getPointerPosition();
+      if (!p) return;
+      const ft = screenToFt(p.x, p.y);
+      addPlant(armedPlantId, snapFt(ft.x), snapFt(ft.y));
+      // Stays armed for multi-place; disarm via X / Esc / tapping the
+      // same palette card again.
+      return;
+    }
+    if (isStageTarget) setSelected(null);
+  }
 
   function onWheel(e: Konva.KonvaEventObject<WheelEvent>) {
     e.evt.preventDefault();
@@ -210,34 +273,10 @@ export function DesignerCanvas({ width, height, stageRef }: Props) {
           setPos({ x: pos.x + sx, y: pos.y + sy });
           stage.position({ x: 0, y: 0 });
         }}
-        onMouseMove={(e) => {
-          if (!drawingBed) return;
-          const p = e.target.getStage()?.getPointerPosition();
-          if (!p) return;
-          const ft = screenToFt(p.x, p.y);
-          setCursorFt({ x: snapFt(ft.x), y: snapFt(ft.y) });
-        }}
-        onMouseDown={(e) => {
-          if (drawingBed) {
-            const stage = e.target.getStage();
-            const p = stage?.getPointerPosition();
-            if (!p) return;
-            const ft = screenToFt(p.x, p.y);
-            const snap = { x: snapFt(ft.x), y: snapFt(ft.y) };
-            // Close if clicking near first point
-            if (
-              draftPts.length >= 3 &&
-              Math.hypot(snap.x - draftPts[0].x, snap.y - draftPts[0].y) <
-                CLOSE_SNAP_FT
-            ) {
-              finishDrawing();
-              return;
-            }
-            setDraftPts((pts) => [...pts, snap]);
-            return;
-          }
-          if (e.target === e.target.getStage()) setSelected(null);
-        }}
+        onMouseMove={(e) => handlePointerMove(e)}
+        onTouchMove={(e) => handlePointerMove(e)}
+        onMouseDown={(e) => handlePointerDown(e)}
+        onTouchStart={(e) => handlePointerDown(e)}
         onDblClick={() => {
           if (drawingBed) finishDrawing();
         }}
@@ -327,18 +366,26 @@ export function DesignerCanvas({ width, height, stageRef }: Props) {
             </>
           )}
 
-          {/* Drag preview ghost */}
-          {dragPreview && (
-            <Circle
-              x={dragPreview.x * pxPerFt + pos.x}
-              y={dragPreview.y * pxPerFt + pos.y}
-              radius={12}
-              fill="rgba(22,163,74,0.25)"
-              stroke="#16a34a"
-              dash={[4, 4]}
-              listening={false}
-            />
-          )}
+          {/* Drag/tap preview ghost */}
+          {dragPreview && (() => {
+            const armedPlant = armedPlantId ? getPlant(armedPlantId) : null;
+            const ghostRadius = armedPlant
+              ? (armedPlant.matureSpreadFt / 2) * pxPerFt
+              : 12;
+            return (
+              <Circle
+                x={dragPreview.x * pxPerFt + pos.x}
+                y={dragPreview.y * pxPerFt + pos.y}
+                radius={ghostRadius}
+                fill={armedPlant ? armedPlant.swatchColor : "rgba(22,163,74,0.25)"}
+                opacity={armedPlant ? 0.4 : 1}
+                stroke="#16a34a"
+                strokeWidth={2}
+                dash={[4, 4]}
+                listening={false}
+              />
+            );
+          })()}
 
           {/* Placed plants */}
           {design.plants.map((pp) => {
@@ -408,7 +455,7 @@ export function DesignerCanvas({ width, height, stageRef }: Props) {
       </Stage>
 
       {/* Overlay controls */}
-      <div className="absolute left-2 bottom-2 bg-white/90 backdrop-blur rounded-lg shadow border border-stone-200 text-xs px-3 py-2 flex items-center gap-3">
+      <div className="absolute left-2 bottom-2 max-w-[calc(100%-1rem)] bg-white/90 backdrop-blur rounded-lg shadow border border-stone-200 text-xs px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <span className="font-mono">{Math.round(scale * 100)}%</span>
         <span className="text-stone-500">·</span>
         <span className="text-stone-500">1 sq = 1 ft</span>

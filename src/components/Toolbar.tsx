@@ -66,7 +66,7 @@ export function Toolbar({
   }
 
   return (
-    <div className="h-12 border-b border-stone-200 bg-white flex items-center px-2 gap-1">
+    <div className="h-12 border-b border-stone-200 bg-white flex items-center px-2 gap-1 relative z-40">
       <button
         onClick={onOpenDesigns}
         className="px-2 py-1.5 rounded-md hover:bg-stone-100 flex items-center gap-1.5 text-sm"
@@ -174,7 +174,7 @@ export function Toolbar({
           <span className="hidden md:inline">Share</span>
         </button>
         {shareLink && (
-          <div className="absolute right-0 top-full mt-1 bg-stone-900 text-white text-xs rounded-md px-3 py-2 shadow-lg whitespace-nowrap">
+          <div className="absolute right-0 top-full mt-1 z-50 bg-stone-900 text-white text-xs rounded-md px-3 py-2 shadow-lg whitespace-nowrap">
             Copied to clipboard
           </div>
         )}
@@ -215,7 +215,7 @@ function ExportMenu({ stageRef }: { stageRef: React.RefObject<Konva.Stage> }) {
       </button>
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 w-44 bg-white border border-stone-200 rounded-lg shadow-lg py-1 z-10"
+          className="absolute right-0 top-full mt-1 w-44 bg-white border border-stone-200 rounded-lg shadow-lg py-1 z-50"
           onMouseLeave={() => setOpen(false)}
         >
           <button

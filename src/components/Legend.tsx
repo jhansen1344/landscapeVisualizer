@@ -13,7 +13,7 @@ export function Legend() {
   if (counts.size === 0) return null;
 
   return (
-    <div className="absolute right-3 top-3 bg-white/95 backdrop-blur border border-stone-200 rounded-lg shadow-sm max-w-xs max-h-[60%] overflow-y-auto">
+    <div className="absolute right-3 bottom-16 md:bottom-auto md:top-3 bg-white/95 backdrop-blur border border-stone-200 rounded-lg shadow-sm max-w-[16rem] md:max-w-xs max-h-[40%] md:max-h-[60%] overflow-y-auto">
       <div className="px-3 py-2 border-b border-stone-100 text-[11px] font-semibold uppercase tracking-wide text-stone-600">
         Legend
       </div>
