@@ -4,7 +4,7 @@ import { ARButton, XR, Controllers, useHitTest } from "@react-three/xr";
 import { OrbitControls, Environment } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Info } from "lucide-react";
+import { ArrowLeft, Info, ArrowDown, ArrowUp } from "lucide-react";
 import { useDesignStore } from "../store/useDesignStore";
 import { BedScene } from "../components/ar/BedScene";
 
@@ -13,6 +13,10 @@ export function ArView() {
   const [xrSupported, setXrSupported] = useState<boolean | null>(null);
   const [placed, setPlaced] = useState<THREE.Matrix4 | null>(null);
   const [showHelp, setShowHelp] = useState(true);
+  const [yOffset, setYOffset] = useState(0); // user-controllable height nudge (m)
+  const [debug, setDebug] = useState<{ camY: number; anchorY: number } | null>(
+    null
+  );
   const navigate = useNavigate();
   const overlayRef = useRef<HTMLDivElement>(null);
   const [overlayReady, setOverlayReady] = useState(false);
@@ -64,16 +68,23 @@ export function ArView() {
           scene.background = null;
         }}
       >
-        <XR referenceSpace="local-floor">
+        {/*
+         * "local" reference space avoids the unreliable floor-height estimate
+         * that "local-floor" produces on most phones. Hit-test still gives us
+         * the actual surface position, so we don't need a global floor Y.
+         */}
+        <XR referenceSpace="local">
           <ambientLight intensity={0.6} />
           <directionalLight position={[5, 10, 3]} intensity={1.2} castShadow />
           {xrSupported ? (
             <ArPlacementController
               placed={placed}
+              yOffset={yOffset}
               onPlace={(m) => {
                 setPlaced(m);
                 setShowHelp(false);
               }}
+              onDebug={setDebug}
             >
               <BedScene design={design} />
             </ArPlacementController>
@@ -156,6 +167,44 @@ export function ArView() {
             tap where you want the bed to be placed.
           </div>
         )}
+
+        {/* Height nudge controls + diagnostic readout, visible after placement */}
+        {placed && xrSupported && (
+          <div className="pointer-events-auto absolute top-3 right-3 flex flex-col items-stretch gap-2">
+            <div className="bg-white/95 rounded-lg shadow px-3 py-2 text-xs text-stone-700 text-center">
+              <div className="font-semibold mb-1">Bed height</div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setYOffset((v) => v - 0.1)}
+                  className="flex-1 py-1.5 rounded border border-stone-300 hover:bg-stone-100 flex items-center justify-center"
+                  title="Lower by 10cm"
+                >
+                  <ArrowDown className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setYOffset(0)}
+                  className="px-2 py-1.5 rounded border border-stone-300 hover:bg-stone-100 text-[10px] tabular-nums"
+                  title="Reset offset"
+                >
+                  {yOffset >= 0 ? "+" : ""}
+                  {yOffset.toFixed(1)}m
+                </button>
+                <button
+                  onClick={() => setYOffset((v) => v + 0.1)}
+                  className="flex-1 py-1.5 rounded border border-stone-300 hover:bg-stone-100 flex items-center justify-center"
+                  title="Raise by 10cm"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            {debug && (
+              <div className="bg-stone-900/80 text-white rounded-md px-2 py-1 text-[10px] tabular-nums text-center">
+                cam {debug.camY.toFixed(2)}m · anchor {debug.anchorY.toFixed(2)}m
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -169,11 +218,15 @@ export function ArView() {
  */
 function ArPlacementController({
   placed,
+  yOffset,
   onPlace,
+  onDebug,
   children,
 }: {
   placed: THREE.Matrix4 | null;
+  yOffset: number;
   onPlace: (m: THREE.Matrix4) => void;
+  onDebug: (info: { camY: number; anchorY: number }) => void;
   children: React.ReactNode;
 }) {
   const reticleRef = useRef<THREE.Mesh>(null);
@@ -210,8 +263,16 @@ function ArPlacementController({
     );
     if (!pose) return;
     const m = pose.transform.matrix;
-    group.position.set(m[12], m[13], m[14]);
+    group.position.set(m[12], m[13] + yOffset, m[14]);
     // Intentionally ignore rotation so the bed stays flat (see earlier fix).
+
+    // Periodically report camera/anchor Y so the operator can see whether
+    // the placement matches reality.
+    const camY = state.camera.position.y;
+    const anchorY = m[13];
+    if (state.clock.elapsedTime % 0.5 < 0.02) {
+      onDebug({ camY, anchorY });
+    }
   });
 
   useEffect(() => {
@@ -274,7 +335,9 @@ function ArPlacementController({
           const q = new THREE.Quaternion();
           const s = new THREE.Vector3();
           placed.decompose(p, q, s);
-          return <group position={p}>{children}</group>;
+          return (
+            <group position={[p.x, p.y + yOffset, p.z]}>{children}</group>
+          );
         })()}
     </>
   );
